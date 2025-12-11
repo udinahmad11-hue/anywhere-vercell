@@ -1,76 +1,118 @@
 export default async function handler(req, res) {
-  // 1. Set CORS
+  // 1. SET CORS HEADERS UNTUK STREAMING
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Range, Origin, Accept, Content-Type');
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range');
+  res.setHeader('Access-Control-Max-Age', '86400');
   
-  if (req.method === 'OPTIONS') return res.status(200).end();
+  // Handle OPTIONS preflight (PENTING untuk streaming)
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
   
-  // 2. DAPATKAN FULL PATH
-  const fullPath = req.url; // Contoh: "/api/proxy/https://google.com"
-  console.log('Full path received:', fullPath);
-  
-  // 3. EKSTRAK URL TARGET dari path
+  // 2. Tangkap URL target dari path
+  const fullPath = req.url;
   let targetUrl = '';
   
-  // Method A: Ambil semua setelah '/api/proxy/'
   if (fullPath.startsWith('/api/proxy/')) {
     targetUrl = fullPath.substring('/api/proxy/'.length);
   }
-  // Method B: Jika ada di headers (kadang Vercel parse berbeda)
-  else if (req.headers['x-vercel-rewrite-target']) {
-    targetUrl = req.headers['x-vercel-rewrite-target'];
-  }
   
-  // 4. FIX: URL dengan single slash (https:/) → double slash (https://)
+  // Fix single slash issue
   if (targetUrl.includes(':/') && !targetUrl.includes('://')) {
     targetUrl = targetUrl.replace(':/', '://');
   }
   
-  console.log('Target URL extracted:', targetUrl);
-  
-  // 5. Jika tidak ada URL, beri petunjuk
+  // 3. Jika tidak ada URL, tampilkan info
   if (!targetUrl) {
     return res.json({
-      service: 'CORS Proxy (proxy.js)',
-      status: 'running',
-      usage: 'GET /api/proxy/{full-url}',
-      example: '/api/proxy/https://jsonplaceholder.typicode.com/todos/1',
-      debug: {
-        receivedPath: fullPath,
-        headers: req.headers
-      }
+      service: 'CORS Proxy for Streaming',
+      usage: '/api/proxy/{mpd-url}',
+      note: 'Supports MPD/DASH streaming with proper headers'
     });
   }
   
-  // 6. Pastikan ada protocol
-  if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+  // 4. Tambahkan protocol jika perlu
+  if (!targetUrl.startsWith('http')) {
     targetUrl = 'https://' + targetUrl;
   }
   
   try {
-    // 7. Validasi & fetch
     const urlObj = new URL(targetUrl);
-    const response = await fetch(urlObj.href, {
-      headers: { 'User-Agent': 'CORS-Proxy' }
+    
+    // 5. Siapkan headers untuk request
+    const fetchHeaders = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      'Accept': '*/*',
+      'Accept-Encoding': 'identity', // PENTING: jangan gunakan compression untuk streaming
+    };
+    
+    // 6. Forward Range header jika ada (untuk byte-range requests)
+    if (req.headers.range) {
+      fetchHeaders['Range'] = req.headers.range;
+    }
+    
+    // 7. Lakukan fetch dengan streaming support
+    const fetchOptions = {
+      method: req.method,
+      headers: fetchHeaders,
+      redirect: 'follow'
+    };
+    
+    // 8. JANGAN timeout untuk streaming!
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000); // 30 detik
+    fetchOptions.signal = controller.signal;
+    
+    const response = await fetch(urlObj.href, fetchOptions);
+    clearTimeout(timeout);
+    
+    // 9. COPY SEMUA HEADERS dari target server (kecuali beberapa)
+    const headersToCopy = [
+      'content-type', 'content-length', 'content-range', 'accept-ranges',
+      'cache-control', 'etag', 'last-modified', 'server'
+    ];
+    
+    headersToCopy.forEach(header => {
+      const value = response.headers.get(header);
+      if (value) {
+        res.setHeader(header, value);
+      }
     });
     
-    const data = await response.text();
-    const contentType = response.headers.get('content-type');
-    if (contentType) res.setHeader('Content-Type', contentType);
+    // 10. SET HEADER KHUSUS UNTUK STREAMING
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Range, Origin, Accept');
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range');
     
-    res.status(response.status).send(data);
+    // 11. Set content-type khusus untuk MPD
+    if (urlObj.href.endsWith('.mpd') || response.headers.get('content-type')?.includes('application/dash+xml')) {
+      res.setHeader('Content-Type', 'application/dash+xml');
+    }
+    
+    // 12. Set status code
+    res.status(response.status);
+    
+    // 13. Stream the response body (PENTING untuk video segments)
+    const reader = response.body.getReader();
+    
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      res.write(value);
+    }
+    
+    res.end();
     
   } catch (error) {
-    console.error('Error:', error.message);
+    console.error('Streaming error:', error);
+    
     res.status(500).json({
-      error: 'Proxy failed',
+      error: 'Streaming failed',
       message: error.message,
-      targetUrl: targetUrl,
-      debug: {
-        fullPath: fullPath,
-        rawTarget: targetUrl
-      }
+      targetUrl: targetUrl
     });
   }
 }
