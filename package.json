@@ -1,5 +1,5 @@
 {
-  "name": "hue-cors-proxy",
+  "name": "streaming-cors-proxy",
   "version": "1.0.0",
   "main": "api/proxy.js",
   "scripts": {},
