@@ -1,14 +1,6 @@
 {
-  "name": "vercel-cors-proxy",
+  "name": "anywhere-vercel",
   "version": "1.0.0",
-  "description": "CORS Proxy for Vercel (converted from Node.js server)",
-  "type": "module",
   "main": "api/proxy.js",
-  "scripts": {},
-  "engines": {
-    "node": ">=18"
-  },
-  "keywords": ["cors", "proxy", "vercel"],
-  "author": "",
-  "license": "MIT"
+  "scripts": {}
 }
