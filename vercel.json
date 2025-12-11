@@ -1,12 +1,25 @@
 {
   "rewrites": [
     {
-      "source": "/api/proxy/(.*)",
+      "source": "/api/proxy/:url+",
       "destination": "/api/proxy"
     },
     {
-      "source": "/proxy/(.*)",
+      "source": "/proxy/:url+",
       "destination": "/api/proxy"
     }
-  ]
+  ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "*" }
+      ]
+    }
+  ],
+  "functions": {
+    "api/proxy.js": {
+      "maxDuration": 10
+    }
+  }
 }
