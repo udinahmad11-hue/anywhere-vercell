@@ -1,7 +1,7 @@
 {
   "name": "cors-proxy-vercel",
   "version": "1.0.0",
-  "description": "CORS Proxy for Vercel",
+  "description": "Simple CORS Proxy for Vercel",
   "main": "index.js",
   "scripts": {},
   "engines": {
