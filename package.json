@@ -1,11 +1,13 @@
 {
-  "name": "cors-proxy-vercel",
+  "name": "hue-cors-proxy",
   "version": "1.0.0",
-  "description": "Simple CORS Proxy for Vercel",
-  "main": "index.js",
-  "scripts": {},
+  "description": "CORS Proxy untuk Vercel dengan pola /api/proxy/{url}",
+  "type": "module",
   "engines": {
-    "node": ">=18.x"
+    "node": ">=18"
   },
+  "scripts": {},
+  "keywords": ["cors", "proxy", "vercel"],
+  "author": "",
   "license": "MIT"
 }
