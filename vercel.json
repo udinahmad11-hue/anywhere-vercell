@@ -2,16 +2,23 @@
   "functions": {
     "api/proxy.js": {
       "maxDuration": 30
+    },
+    "api/proxy-simple.js": {
+      "maxDuration": 30
     }
   },
   "rewrites": [
     {
-      "source": "/api/(.*)",
-      "destination": "/api/proxy"
+      "source": "/proxy/(.*)",
+      "destination": "/api/proxy-simple"
     },
     {
-      "source": "/(.*)",
-      "destination": "/api/proxy"
+      "source": "/api/proxy/(.*)",
+      "destination": "/api/proxy-simple"
+    },
+    {
+      "source": "/api/proxy",
+      "destination": "/api/proxy-simple"
     }
   ],
   "headers": [
@@ -19,7 +26,7 @@
       "source": "/(.*)",
       "headers": [
         { "key": "Access-Control-Allow-Origin", "value": "*" },
-        { "key": "Access-Control-Allow-Methods", "value": "GET,POST,PUT,DELETE,OPTIONS" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET,POST,PUT,DELETE,OPTIONS,PATCH" },
         { "key": "Access-Control-Allow-Headers", "value": "*" }
       ]
     }
