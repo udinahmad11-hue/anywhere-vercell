@@ -1,113 +1,71 @@
+// api/proxy.js - VERSI SIMPLE YANG PASTI BERJALAN
 export default async function handler(req, res) {
-  // ===== 1. SET HEADER CORS =====
+  // 1. Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', '*');
-  res.setHeader('Access-Control-Max-Age', '86400'); // Cache preflight 24 jam
-
-  // Tangani preflight OPTIONS request
+  
+  // 2. Handle OPTIONS preflight
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
-
-  // ===== 2. EKSTRAK URL TARGET DARI PATH =====
-  // Contoh: /api/proxy/https://example.com/data → ambil bagian setelah '/api/proxy/'
-  const fullPath = req.url;
-  const proxyPrefix = '/api/proxy/';
   
+  // 3. Extract URL from path: /api/proxy/https://example.com
+  const fullUrl = req.url;
+  console.log('Request URL:', fullUrl);
+  
+  // Remove '/api/proxy' prefix
   let targetUrl = '';
-  
-  if (fullPath.startsWith(proxyPrefix)) {
-    targetUrl = fullPath.slice(proxyPrefix.length);
+  if (fullUrl.startsWith('/api/proxy/')) {
+    targetUrl = fullUrl.substring('/api/proxy/'.length);
   } else if (req.query.url) {
-    // Fallback: support juga via query parameter ?url=
+    // Fallback: support query parameter
     targetUrl = req.query.url;
   }
   
-  // ===== 3. JIKA TIDAK ADA URL, BERI PETUNJUK =====
+  // 4. If no URL, show usage
   if (!targetUrl) {
-    return res.status(200).json({
-      service: 'Hue Anywhere CORS Proxy',
-      endpoints: {
-        primary: 'GET /api/proxy/{full-url}',
-        example: '/api/proxy/https://jsonplaceholder.typicode.com/todos/1',
-        alt: 'GET /api/proxy?url={encoded-url}'
-      }
+    return res.json({
+      message: 'Hue CORS Proxy is running!',
+      usage: 'GET /api/proxy/{your-full-url}',
+      example: '/api/proxy/https://jsonplaceholder.typicode.com/todos/1',
+      note: 'URL must include http:// or https://'
     });
   }
   
-  // ===== 4. DECODE & VALIDASI URL =====
+  // 5. Add https:// if missing
+  if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+    targetUrl = 'https://' + targetUrl;
+  }
+  
   try {
-    // Decode URL jika perlu
-    targetUrl = decodeURIComponent(targetUrl);
+    console.log('Proxying to:', targetUrl);
     
-    // Tambahkan protocol jika tidak ada
-    if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
-      targetUrl = 'https://' + targetUrl;
+    // 6. Fetch the target URL
+    const response = await fetch(targetUrl, {
+      headers: {
+        'User-Agent': 'Hue-CORS-Proxy/1.0'
+      }
+    });
+    
+    // 7. Get response content
+    const data = await response.text();
+    
+    // 8. Copy content-type header
+    const contentType = response.headers.get('content-type');
+    if (contentType) {
+      res.setHeader('Content-Type', contentType);
     }
     
-    // Validasi format URL
-    const urlObj = new URL(targetUrl);
-    
-    // ===== 5. PROXY REQUEST KE TARGET =====
-    const proxyRes = await fetch(urlObj.href, {
-      method: req.method,
-      headers: {
-        'User-Agent': 'Hue-CORS-Proxy/1.0',
-        'Accept': req.headers['accept'] || '*/*',
-        ...(req.headers['authorization'] && { 'Authorization': req.headers['authorization'] })
-      },
-      body: req.method !== 'GET' && req.method !== 'HEAD' ? 
-            await getRawBody(req) : undefined,
-      signal: AbortSignal.timeout(10000) // Timeout 10 detik
-    });
-    
-    // ===== 6. FORWARD RESPONSE =====
-    // Salin status dan headers
-    res.status(proxyRes.status);
-    
-    // Salin semua headers kecuali yg terkait encoding/security
-    const headersToCopy = [...proxyRes.headers.entries()].filter(
-      ([key]) => !['content-encoding', 'content-length', 'transfer-encoding'].includes(key.toLowerCase())
-    );
-    
-    headersToCopy.forEach(([key, value]) => {
-      res.setHeader(key, value);
-    });
-    
-    // Pastikan header CORS tetap ada
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    
-    // Stream response body
-    const buffer = await proxyRes.arrayBuffer();
-    res.send(Buffer.from(buffer));
+    // 9. Send response
+    res.status(response.status).send(data);
     
   } catch (error) {
-    // ===== 7. ERROR HANDLING =====
-    console.error('Proxy Error:', error.message);
-    
-    const errorMap = {
-      'AbortError': { status: 504, message: 'Gateway Timeout' },
-      'ENOTFOUND': { status: 502, message: 'Domain Not Found' },
-      'ERR_INVALID_URL': { status: 400, message: 'Invalid URL Format' }
-    };
-    
-    const errorInfo = errorMap[error.code || error.name] || 
-                     { status: 500, message: 'Internal Proxy Error' };
-    
-    res.status(errorInfo.status).json({
-      error: errorInfo.message,
-      originalUrl: targetUrl,
-      details: error.message
+    console.error('Error:', error.message);
+    res.status(500).json({
+      error: 'Proxy failed',
+      message: error.message,
+      targetUrl: targetUrl
     });
   }
-}
-
-// Helper untuk membaca raw body
-async function getRawBody(req) {
-  return new Promise((resolve) => {
-    const chunks = [];
-    req.on('data', chunk => chunks.push(chunk));
-    req.on('end', () => resolve(Buffer.concat(chunks)));
-  });
 }
