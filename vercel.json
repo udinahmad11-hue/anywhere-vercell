@@ -6,7 +6,11 @@
     },
     {
       "source": "/proxy/(.*)",
-      "destination": "/api/proxy"
+      "destination": "/api/[[...all]]"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/api/[[...all]]"
     }
   ]
 }
