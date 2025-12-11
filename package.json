@@ -1,11 +1,7 @@
 {
   "name": "hue-cors-proxy",
   "version": "1.0.0",
-  "description": "CORS Proxy for Vercel",
   "main": "api/proxy.js",
   "scripts": {},
-  "engines": {
-    "node": ">=18"
-  },
-  "license": "MIT"
+  "engines": { "node": ">=18" }
 }
