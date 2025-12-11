@@ -1,76 +1,113 @@
-// CORS Proxy untuk Vercel - Versi Paling Sederhana
 export default async function handler(req, res) {
-  // Set CORS headers
+  // ===== 1. SET HEADER CORS =====
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', '*');
-  
-  // Handle preflight OPTIONS request
+  res.setHeader('Access-Control-Max-Age', '86400'); // Cache preflight 24 jam
+
+  // Tangani preflight OPTIONS request
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
+
+  // ===== 2. EKSTRAK URL TARGET DARI PATH =====
+  // Contoh: /api/proxy/https://example.com/data → ambil bagian setelah '/api/proxy/'
+  const fullPath = req.url;
+  const proxyPrefix = '/api/proxy/';
   
-  // Dapatkan URL target dari query parameter
-  const targetUrl = req.query.url;
+  let targetUrl = '';
   
-  // Jika tidak ada URL, tampilkan petunjuk
+  if (fullPath.startsWith(proxyPrefix)) {
+    targetUrl = fullPath.slice(proxyPrefix.length);
+  } else if (req.query.url) {
+    // Fallback: support juga via query parameter ?url=
+    targetUrl = req.query.url;
+  }
+  
+  // ===== 3. JIKA TIDAK ADA URL, BERI PETUNJUK =====
   if (!targetUrl) {
     return res.status(200).json({
-      service: 'CORS Proxy',
-      status: 'running',
-      usage: 'GET /api/proxy?url={your-url}',
-      examples: [
-        '/api/proxy?url=https://jsonplaceholder.typicode.com/todos/1',
-        '/api/proxy?url=https://api.github.com/users/octocat'
-      ],
-      note: 'Add ?url= parameter with the target URL'
+      service: 'Hue Anywhere CORS Proxy',
+      endpoints: {
+        primary: 'GET /api/proxy/{full-url}',
+        example: '/api/proxy/https://jsonplaceholder.typicode.com/todos/1',
+        alt: 'GET /api/proxy?url={encoded-url}'
+      }
     });
   }
   
+  // ===== 4. DECODE & VALIDASI URL =====
   try {
-    // Validasi URL
-    let urlToFetch = targetUrl;
-    if (!urlToFetch.startsWith('http://') && !urlToFetch.startsWith('https://')) {
-      urlToFetch = 'https://' + urlToFetch;
+    // Decode URL jika perlu
+    targetUrl = decodeURIComponent(targetUrl);
+    
+    // Tambahkan protocol jika tidak ada
+    if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+      targetUrl = 'https://' + targetUrl;
     }
     
     // Validasi format URL
-    new URL(urlToFetch);
+    const urlObj = new URL(targetUrl);
     
-    console.log('Proxying to:', urlToFetch);
-    
-    // Buat request ke target URL
-    const response = await fetch(urlToFetch, {
+    // ===== 5. PROXY REQUEST KE TARGET =====
+    const proxyRes = await fetch(urlObj.href, {
+      method: req.method,
       headers: {
-        'User-Agent': 'CORS-Proxy/1.0 (+https://github.com/your-repo)',
-        'Accept': 'application/json, text/*'
+        'User-Agent': 'Hue-CORS-Proxy/1.0',
+        'Accept': req.headers['accept'] || '*/*',
+        ...(req.headers['authorization'] && { 'Authorization': req.headers['authorization'] })
       },
-      timeout: 8000 // 8 detik timeout
+      body: req.method !== 'GET' && req.method !== 'HEAD' ? 
+            await getRawBody(req) : undefined,
+      signal: AbortSignal.timeout(10000) // Timeout 10 detik
     });
     
-    // Dapatkan content type
-    const contentType = response.headers.get('content-type') || 'text/plain';
-    res.setHeader('Content-Type', contentType);
+    // ===== 6. FORWARD RESPONSE =====
+    // Salin status dan headers
+    res.status(proxyRes.status);
     
-    // Dapatkan response body
-    let responseBody;
-    if (contentType.includes('application/json')) {
-      responseBody = await response.json();
-      res.status(response.status).json(responseBody);
-    } else {
-      responseBody = await response.text();
-      res.status(response.status).send(responseBody);
-    }
+    // Salin semua headers kecuali yg terkait encoding/security
+    const headersToCopy = [...proxyRes.headers.entries()].filter(
+      ([key]) => !['content-encoding', 'content-length', 'transfer-encoding'].includes(key.toLowerCase())
+    );
+    
+    headersToCopy.forEach(([key, value]) => {
+      res.setHeader(key, value);
+    });
+    
+    // Pastikan header CORS tetap ada
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    
+    // Stream response body
+    const buffer = await proxyRes.arrayBuffer();
+    res.send(Buffer.from(buffer));
     
   } catch (error) {
-    console.error('Proxy error:', error.message);
+    // ===== 7. ERROR HANDLING =====
+    console.error('Proxy Error:', error.message);
     
-    // Response error yang informatif
-    res.status(500).json({
-      error: 'Proxy failed',
-      message: error.message,
-      targetUrl: targetUrl,
-      tip: 'Make sure the URL is correct and accessible'
+    const errorMap = {
+      'AbortError': { status: 504, message: 'Gateway Timeout' },
+      'ENOTFOUND': { status: 502, message: 'Domain Not Found' },
+      'ERR_INVALID_URL': { status: 400, message: 'Invalid URL Format' }
+    };
+    
+    const errorInfo = errorMap[error.code || error.name] || 
+                     { status: 500, message: 'Internal Proxy Error' };
+    
+    res.status(errorInfo.status).json({
+      error: errorInfo.message,
+      originalUrl: targetUrl,
+      details: error.message
     });
   }
+}
+
+// Helper untuk membaca raw body
+async function getRawBody(req) {
+  return new Promise((resolve) => {
+    const chunks = [];
+    req.on('data', chunk => chunks.push(chunk));
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+  });
 }
