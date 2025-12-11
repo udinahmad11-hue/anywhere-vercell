@@ -1,12 +1,9 @@
 {
-  "name": "cors-anywhere-vercel",
+  "name": "cors-proxy-vercel",
   "version": "1.0.0",
-  "description": "CORS Proxy Server on Vercel",
-  "main": "api/proxy.js",
+  "description": "CORS Proxy for Vercel",
+  "main": "index.js",
   "scripts": {},
-  "dependencies": {
-    "http-proxy": "^1.18.1"
-  },
   "engines": {
     "node": ">=18.x"
   },
