@@ -1,56 +1,28 @@
 export default async function handler(req, res) {
-  // Allow only GET & POST
-  if (!["GET", "POST"].includes(req.method)) {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
+    const url = req.query.url;
 
-  const targetUrl = req.query.url;
-
-  if (!targetUrl) {
-    return res.status(400).json({ error: "Missing url parameter" });
-  }
-
-  // Basic security: block local/internal addresses
-  if (
-    targetUrl.startsWith("http://localhost") ||
-    targetUrl.startsWith("http://127.") ||
-    targetUrl.startsWith("https://127.")
-  ) {
-    return res.status(403).json({ error: "Forbidden target" });
-  }
-
-  try {
-    const fetchOptions = {
-      method: req.method,
-      headers: {
-        "User-Agent": "Vercel-Proxy",
-        ...(req.headers["content-type"]
-          ? { "Content-Type": req.headers["content-type"] }
-          : {}),
-      },
-    };
-
-    if (req.method === "POST") {
-      fetchOptions.body = JSON.stringify(req.body);
+    if (!url) {
+        return res.status(400).send("Missing ?url=");
     }
 
-    const response = await fetch(targetUrl, fetchOptions);
-    const contentType = response.headers.get("content-type") || "";
+    try {
+        const response = await fetch(url, {
+            headers: {
+                "User-Agent": "Mozilla/5.0",
+                "Accept": "*/*"
+            }
+        });
 
-    res.status(response.status);
-    res.setHeader("Access-Control-Allow-Origin", "*");
+        const body = await response.text();
 
-    if (contentType.includes("application/json")) {
-      const data = await response.json();
-      return res.json(data);
-    } else {
-      const text = await response.text();
-      return res.send(text);
+        // ===== CORS HEADERS =====
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "*");
+
+        res.status(200).send(body);
+
+    } catch (err) {
+        res.status(500).send("Proxy error: " + err.message);
     }
-  } catch (error) {
-    return res.status(500).json({
-      error: "Proxy error",
-      message: error.message,
-    });
-  }
 }
