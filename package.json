@@ -1,0 +1,13 @@
+{
+  "name": "cors-anywhere-vercel",
+  "version": "1.0.0",
+  "description": "CORS Anywhere proxy untuk Vercel",
+  "main": "api/proxy/[...url].js",
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel deploy --prod"
+  },
+  "engines": {
+    "node": "18.x"
+  }
+}
