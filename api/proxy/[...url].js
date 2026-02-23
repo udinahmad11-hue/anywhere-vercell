@@ -1,34 +1,28 @@
 // api/proxy/[...url].js
-// CORS Anywhere untuk Vercel - Support Node 24.x
-
-// Daftar domain yang diizinkan
-const ALLOWED_DOMAINS = [
-    'starhubgo.com',
-    'ucdn.starhubgo.com',
-    'mh-bks400-06.starhubgo.com',
-    'starhubgo.secureswiftcontent.com',
-    'd1k1d9j3v9x8c5.cloudfront.net',
-    'd2q8p9v9j9x8c5.cloudfront.net',
-    'd3k1d9j3v9x8c5.cloudfront.net'
-];
+// CORS Anywhere untuk Vercel - ALLOW ALL DOMAINS
+// Versi: 2.0 (No domain restrictions)
 
 // Method yang diizinkan
-const ALLOWED_METHODS = ['GET', 'HEAD', 'OPTIONS'];
+const ALLOWED_METHODS = ['GET', 'HEAD', 'OPTIONS', 'POST', 'PUT', 'DELETE', 'PATCH'];
 
-// Fungsi untuk validasi URL
+// Headers yang diizinkan
+const ALLOWED_HEADERS = [
+    'x-requested-with',
+    'content-type',
+    'range',
+    'referer',
+    'origin',
+    'accept',
+    'user-agent',
+    'authorization',
+    'cookie'
+];
+
+// Fungsi untuk validasi URL (hanya cek format, domain bebas)
 function isValidUrl(urlString) {
     try {
-        const url = new URL(urlString);
-        
-        // Cek protokol
-        if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-            return false;
-        }
-        
-        // Cek domain
-        const hostname = url.hostname;
-        return ALLOWED_DOMAINS.some(domain => hostname.includes(domain));
-        
+        new URL(urlString);
+        return true;
     } catch {
         return false;
     }
@@ -40,36 +34,36 @@ export default async function handler(req, res) {
     if (req.method === 'OPTIONS') {
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Access-Control-Allow-Methods', ALLOWED_METHODS.join(', '));
-        res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Range, Referer, Origin, Accept, User-Agent');
+        res.setHeader('Access-Control-Allow-Headers', ALLOWED_HEADERS.join(', '));
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
         res.setHeader('Access-Control-Max-Age', '86400');
-        res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Content-Type, Accept-Ranges, Content-Disposition');
+        res.setHeader('Access-Control-Expose-Headers', 
+            'Content-Length, Content-Range, Content-Type, Accept-Ranges, Content-Disposition, Content-Encoding'
+        );
         return res.status(204).end();
     }
 
-    // Hanya izinkan GET dan HEAD
-    if (!ALLOWED_METHODS.includes(req.method)) {
-        return res.status(405).json({ 
-            error: 'Method not allowed',
-            allowed_methods: ALLOWED_METHODS
-        });
-    }
-
-    // Ambil URL dari query parameter
+    // Ambil URL dari query parameter atau path
     const { url } = req.query;
     const targetUrl = Array.isArray(url) ? url.join('/') : url;
 
     if (!targetUrl) {
         return res.status(400).json({ 
             error: 'URL parameter is required',
-            usage: 'https://your-domain.vercel.app/api/proxy/https://example.com/file.mpd'
+            usage: 'https://your-domain.vercel.app/api/proxy/https://example.com/file',
+            examples: [
+                '/api/proxy/https://example.com/video.mp4',
+                '/api/proxy?url=https://example.com/video.mp4',
+                '/proxy/https://example.com/video.mp4'
+            ]
         });
     }
 
-    // Validasi URL
+    // Validasi URL (hanya format, domain bebas)
     if (!isValidUrl(targetUrl)) {
-        return res.status(403).json({ 
-            error: 'URL not allowed',
-            allowed_domains: ALLOWED_DOMAINS
+        return res.status(400).json({ 
+            error: 'Invalid URL format',
+            message: 'Please provide a valid URL including protocol (http:// or https://)'
         });
     }
 
@@ -82,53 +76,73 @@ export default async function handler(req, res) {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': '*/*',
             'Accept-Language': 'en-US,en;q=0.9',
-            'Referer': 'https://www.starhub.com/',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
             'Host': parsedUrl.hostname,
-            'X-Forwarded-For': req.headers['x-forwarded-for'] || req.socket.remoteAddress || '42.60.0.1'
+            'X-Forwarded-For': req.headers['x-forwarded-for'] || req.socket.remoteAddress || '8.8.8.8',
+            'X-Real-IP': req.headers['x-forwarded-for'] || req.socket.remoteAddress || '8.8.8.8'
         };
 
-        // Forward range header jika ada
-        if (req.headers.range) {
-            headers['Range'] = req.headers.range;
-        }
+        // Forward specific headers dari client
+        const forwardHeaders = [
+            'range', 'if-range', 'if-modified-since', 'if-none-match',
+            'authorization', 'cookie', 'origin', 'referer'
+        ];
+        
+        forwardHeaders.forEach(header => {
+            if (req.headers[header]) {
+                headers[header] = req.headers[header];
+            }
+        });
+
+        // Log untuk monitoring
+        console.log(`[PROXY] ${req.method} ${targetUrl}`);
 
         // Fetch request ke target
         const response = await fetch(targetUrl, {
             method: req.method,
             headers: headers,
-            redirect: 'follow'
+            redirect: 'follow',
+            follow: 10
         });
 
-        // Set CORS headers
+        // Set CORS headers (allow all)
         res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Content-Type, Accept-Ranges, Content-Disposition');
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+        res.setHeader('Access-Control-Expose-Headers', 
+            'Content-Length, Content-Range, Content-Type, Accept-Ranges, Content-Disposition, Content-Encoding'
+        );
         
-        // Forward response headers
-        const forwardHeaders = [
-            'content-type',
-            'content-length',
-            'content-range',
-            'accept-ranges',
-            'cache-control',
-            'last-modified'
-        ];
-
-        forwardHeaders.forEach(header => {
-            const value = response.headers.get(header);
-            if (value) {
-                res.setHeader(header, value);
+        // Forward semua headers dari response
+        response.headers.forEach((value, key) => {
+            // Skip headers yang bermasalah
+            if (!['content-encoding', 'transfer-encoding'].includes(key.toLowerCase())) {
+                res.setHeader(key, value);
             }
         });
 
+        // Tambahkan custom headers
+        res.setHeader('X-Proxy-Server', 'Vercel-CORS-Anywhere-Allow-All');
+        res.setHeader('X-Proxy-Timestamp', Date.now());
+        res.setHeader('X-Proxy-URL', targetUrl);
+        
         // Set status code
         res.status(response.status);
 
         // Handle redirects
-        if (response.status === 301 || response.status === 302 || response.status === 307 || response.status === 308) {
+        if (response.status >= 300 && response.status < 400) {
             const location = response.headers.get('location');
             if (location) {
-                return res.redirect(location);
+                // Resolve relative redirects
+                const absoluteLocation = new URL(location, targetUrl).toString();
+                res.setHeader('Location', absoluteLocation);
+                return res.end();
             }
+        }
+
+        // Untuk response HEAD, tidak perlu body
+        if (req.method === 'HEAD') {
+            return res.end();
         }
 
         // Convert response to buffer
@@ -140,11 +154,18 @@ export default async function handler(req, res) {
 
     } catch (error) {
         console.error('Proxy error:', error);
-        res.status(500).json({ 
+        
+        // Error details
+        const errorResponse = {
             error: 'Proxy error',
             message: error.message,
-            timestamp: new Date().toISOString()
-        });
+            url: targetUrl,
+            method: req.method,
+            timestamp: new Date().toISOString(),
+            tip: 'Make sure the target URL is accessible'
+        };
+
+        res.status(500).json(errorResponse);
     }
 }
 
@@ -152,6 +173,7 @@ export default async function handler(req, res) {
 export const config = {
     api: {
         bodyParser: false,
-        externalResolver: true
+        externalResolver: true,
+        responseLimit: false // No limit for large files
     }
 };
