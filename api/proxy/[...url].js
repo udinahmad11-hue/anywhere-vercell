@@ -1,5 +1,5 @@
 // api/proxy/[...url].js
-// CORS Anywhere untuk Vercel - Support wildcard path
+// CORS Anywhere untuk Vercel - Support Node 24.x
 
 // Daftar domain yang diizinkan
 const ALLOWED_DOMAINS = [
@@ -12,30 +12,8 @@ const ALLOWED_DOMAINS = [
     'd3k1d9j3v9x8c5.cloudfront.net'
 ];
 
-// Headers yang diizinkan
-const ALLOWED_HEADERS = [
-    'x-requested-with',
-    'content-type',
-    'range',
-    'referer',
-    'origin',
-    'accept',
-    'user-agent'
-];
-
 // Method yang diizinkan
 const ALLOWED_METHODS = ['GET', 'HEAD', 'OPTIONS'];
-
-// Headers default untuk request
-const DEFAULT_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': '*/*',
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Accept-Encoding': 'gzip, deflate, br',
-    'Connection': 'keep-alive',
-    'Referer': 'https://www.starhub.com/',
-    'X-Forwarded-For': '42.60.0.1'
-};
 
 // Fungsi untuk validasi URL
 function isValidUrl(urlString) {
@@ -51,31 +29,21 @@ function isValidUrl(urlString) {
         const hostname = url.hostname;
         return ALLOWED_DOMAINS.some(domain => hostname.includes(domain));
         
-    } catch (error) {
+    } catch {
         return false;
     }
 }
 
-// Fungsi untuk mendapatkan IP client
-function getClientIp(req) {
-    const forwardedFor = req.headers['x-forwarded-for'];
-    if (forwardedFor) {
-        return forwardedFor.split(',')[0].trim();
-    }
-    return req.headers['x-real-ip'] || req.socket.remoteAddress || '42.60.0.1';
-}
-
 // Handler utama
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
     // Handle OPTIONS request (CORS preflight)
     if (req.method === 'OPTIONS') {
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Access-Control-Allow-Methods', ALLOWED_METHODS.join(', '));
-        res.setHeader('Access-Control-Allow-Headers', ALLOWED_HEADERS.join(', '));
+        res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Range, Referer, Origin, Accept, User-Agent');
         res.setHeader('Access-Control-Max-Age', '86400');
         res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Content-Type, Accept-Ranges, Content-Disposition');
-        res.status(204).end();
-        return;
+        return res.status(204).end();
     }
 
     // Hanya izinkan GET dan HEAD
@@ -86,7 +54,7 @@ module.exports = async (req, res) => {
         });
     }
 
-    // Ambil URL dari path parameter
+    // Ambil URL dari query parameter
     const { url } = req.query;
     const targetUrl = Array.isArray(url) ? url.join('/') : url;
 
@@ -109,60 +77,49 @@ module.exports = async (req, res) => {
         // Parse target URL
         const parsedUrl = new URL(targetUrl);
         
-        // Headers untuk request ke target
+        // Headers untuk request
         const headers = {
-            ...DEFAULT_HEADERS,
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': '*/*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': 'https://www.starhub.com/',
             'Host': parsedUrl.hostname,
-            'X-Forwarded-For': getClientIp(req),
-            'X-Real-IP': getClientIp(req)
+            'X-Forwarded-For': req.headers['x-forwarded-for'] || req.socket.remoteAddress || '42.60.0.1'
         };
 
-        // Forward specific headers dari client
-        const forwardHeaders = ['range', 'if-range', 'if-modified-since', 'if-none-match'];
-        forwardHeaders.forEach(header => {
-            if (req.headers[header]) {
-                headers[header] = req.headers[header];
-            }
-        });
-
-        // Opsi untuk fetch
-        const fetchOptions = {
-            method: req.method,
-            headers: headers,
-            redirect: 'follow',
-            follow: 5
-        };
+        // Forward range header jika ada
+        if (req.headers.range) {
+            headers['Range'] = req.headers.range;
+        }
 
         // Fetch request ke target
-        const response = await fetch(targetUrl, fetchOptions);
+        const response = await fetch(targetUrl, {
+            method: req.method,
+            headers: headers,
+            redirect: 'follow'
+        });
 
         // Set CORS headers
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Content-Type, Accept-Ranges, Content-Disposition');
         
         // Forward response headers
-        const forwardResponseHeaders = [
+        const forwardHeaders = [
             'content-type',
             'content-length',
             'content-range',
             'accept-ranges',
             'cache-control',
-            'expires',
-            'last-modified',
-            'etag'
+            'last-modified'
         ];
 
-        forwardResponseHeaders.forEach(header => {
+        forwardHeaders.forEach(header => {
             const value = response.headers.get(header);
             if (value) {
                 res.setHeader(header, value);
             }
         });
 
-        // Tambahkan custom headers
-        res.setHeader('X-Proxy-Server', 'Vercel-CORS-Anywhere');
-        res.setHeader('X-Proxy-Timestamp', Date.now());
-        
         // Set status code
         res.status(response.status);
 
@@ -170,34 +127,16 @@ module.exports = async (req, res) => {
         if (response.status === 301 || response.status === 302 || response.status === 307 || response.status === 308) {
             const location = response.headers.get('location');
             if (location) {
-                res.setHeader('Location', location);
-                res.end();
-                return;
+                return res.redirect(location);
             }
         }
 
-        // Stream response body
-        const reader = response.body.getReader();
-        const stream = new ReadableStream({
-            async start(controller) {
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    controller.enqueue(value);
-                }
-                controller.close();
-            }
-        });
-
-        // Pipe stream ke response
-        const streamResponse = new Response(stream, {
-            status: response.status,
-            statusText: response.statusText
-        });
-
+        // Convert response to buffer
+        const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        
         // Send response
-        const buffer = await streamResponse.arrayBuffer();
-        res.send(Buffer.from(buffer));
+        res.send(buffer);
 
     } catch (error) {
         console.error('Proxy error:', error);
@@ -207,10 +146,10 @@ module.exports = async (req, res) => {
             timestamp: new Date().toISOString()
         });
     }
-};
+}
 
 // Konfigurasi untuk Vercel
-module.exports.config = {
+export const config = {
     api: {
         bodyParser: false,
         externalResolver: true
