@@ -1,7 +1,8 @@
 {
-  "functions": {
-    "api/**/*.js": {
-      "runtime": "nodejs18.x"
+  "routes": [
+    {
+      "src": "/api/cors/(.*)",
+      "dest": "/api/cors/$1"
     }
-  }
+  ]
 }
