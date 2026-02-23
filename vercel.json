@@ -1,5 +1,37 @@
 {
-  "routes": [
-    { "src": "/proxy", "dest": "/api/proxy.js" }
+  "version": 2,
+  "functions": {
+    "api/proxy/[...url].js": {
+      "maxDuration": 10
+    }
+  },
+  "headers": [
+    {
+      "source": "/api/proxy/(.*)",
+      "headers": [
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET, HEAD, OPTIONS"
+        },
+        {
+          "key": "Access-Control-Allow-Headers",
+          "value": "X-Requested-With, Content-Type, Range, Referer, Origin, Accept, User-Agent"
+        },
+        {
+          "key": "Access-Control-Expose-Headers",
+          "value": "Content-Length, Content-Range, Content-Type, Accept-Ranges, Content-Disposition"
+        }
+      ]
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/proxy/(.*)",
+      "destination": "/api/proxy/$1"
+    }
   ]
 }
